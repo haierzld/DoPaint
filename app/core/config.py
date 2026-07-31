@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     APP_DEBUG: bool = True
     APP_SECRET_KEY: str = "change-me"
     API_PREFIX: str = "/api/v1"
-    SELF_HOST: str = "localhost:8000"  # 本服务公网地址，用于构造图片URL
+    SELF_HOST: str = "47.253.177.168:8000"  # 本服务公网地址，用于构造图片/视频URL
 
     # ---- 数据库 ----
     DATABASE_URL: str = "mysql+pymysql://root:password@127.0.0.1:3306/dopaint"
