@@ -5,8 +5,6 @@ AI 服务封装
 - 任务轮询
 """
 from __future__ import annotations
-import os
-import base64
 import re
 import time
 import requests
@@ -153,23 +151,15 @@ class AIService:
     @staticmethod
     def _get_image_data(image_url: str) -> str:
         """
-        将图片转为 DashScope 可用的格式。
-        本地路径 → 读取文件 → data:image/jpeg;base64,xxx
+        将图片转为 DashScope 可用的 HTTP URL。
+        DashScope img_url 只接受 HTTP/HTTPS URL，不支持 base64 data URI。
         """
         if not image_url:
             return ""
 
-        # 本地路径 /local/xxx.jpg → 读取本地文件
+        # 本地路径 /local/xxx.jpg → http://公网IP:8000/local/xxx.jpg
         if image_url.startswith("/local/"):
-            local_path = os.path.join("local_storage", image_url.replace("/local/", ""))
-            if os.path.exists(local_path):
-                with open(local_path, "rb") as f:
-                    data = f.read()
-                b64 = base64.b64encode(data).decode("utf-8")
-                return f"data:image/jpeg;base64,{b64}"
-            else:
-                logger.warning(f"本地图片不存在: {local_path}")
-                return image_url
+            return f"http://{settings.SELF_HOST}{image_url}"
 
         # 已是 http/https URL，直接返回
         if image_url.startswith("http://") or image_url.startswith("https://"):
@@ -227,29 +217,12 @@ class AIService:
                 "X-DashScope-Async": "enable",
             }
 
-            # 创建 Session 并强制 IPv4，避免 IPv6 下大文件上传超时
-            session = requests.Session()
-            session.mount("https://", requests.adapters.HTTPAdapter(
-                pool_connections=1,
-                pool_maxsize=2,
-                max_retries=2,
-            ))
-            # 强制使用 IPv4
-            import socket
-            orig_getaddrinfo = socket.getaddrinfo
-            def ipv4_getaddrinfo(host, port, family=0, *args, **kwargs):
-                return orig_getaddrinfo(host, port, socket.AF_INET, *args, **kwargs)
-            socket.getaddrinfo = ipv4_getaddrinfo
-
             resp = requests.post(
                 f"{DASHSCOPE_API_BASE}/services/aigc/video-generation/video-synthesis",
                 json=payload,
                 headers=headers,
                 timeout=settings.DASHSCOPE_TIMEOUT,
             )
-
-            # 恢复原始 getaddrinfo
-            socket.getaddrinfo = orig_getaddrinfo
 
             logger.info(f"API响应状态: {resp.status_code} | body前200字符: {resp.text[:200]}")
 
