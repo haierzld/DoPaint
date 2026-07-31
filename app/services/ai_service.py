@@ -148,7 +148,7 @@ class AIService:
     """阿里万象视频生成服务（使用 HTTP API）"""
 
     # 图生视频模型（首帧生视频）
-    VIDEO_MODEL = "wan2.6-i2v-flash"
+    VIDEO_MODEL = "wan2.7-i2v-2026-04-25"
 
     @staticmethod
     def _get_image_data(image_url: str) -> str:
@@ -227,12 +227,29 @@ class AIService:
                 "X-DashScope-Async": "enable",
             }
 
+            # 创建 Session 并强制 IPv4，避免 IPv6 下大文件上传超时
+            session = requests.Session()
+            session.mount("https://", requests.adapters.HTTPAdapter(
+                pool_connections=1,
+                pool_maxsize=2,
+                max_retries=2,
+            ))
+            # 强制使用 IPv4
+            import socket
+            orig_getaddrinfo = socket.getaddrinfo
+            def ipv4_getaddrinfo(host, port, family=0, *args, **kwargs):
+                return orig_getaddrinfo(host, port, socket.AF_INET, *args, **kwargs)
+            socket.getaddrinfo = ipv4_getaddrinfo
+
             resp = requests.post(
                 f"{DASHSCOPE_API_BASE}/services/aigc/video-generation/video-synthesis",
                 json=payload,
                 headers=headers,
-                timeout=60,
+                timeout=settings.DASHSCOPE_TIMEOUT,
             )
+
+            # 恢复原始 getaddrinfo
+            socket.getaddrinfo = orig_getaddrinfo
 
             logger.info(f"API响应状态: {resp.status_code} | body前200字符: {resp.text[:200]}")
 

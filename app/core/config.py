@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # ---- 阿里万象 (DashScope) ----
     DASHSCOPE_API_KEY: str = ""
-    DASHSCOPE_VIDEO_MODEL: str = "wanx-v1-image-to-video"
+    DASHSCOPE_VIDEO_MODEL: str = "wan2.7-i2v-2026-04-25"
     DASHSCOPE_MAX_RETRY: int = 3
     DASHSCOPE_TIMEOUT: int = 120
 
