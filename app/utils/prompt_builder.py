@@ -50,6 +50,7 @@ class PromptBuilder:
         返回: { prompt, negative_prompt, duration, resolution }
         """
         if custom_prompt:
+            # custom_prompt 已包含画作分析描述 + 风格指令，GLOBAL_PREFIX 作为系统约束
             final_prompt = f"{cls.GLOBAL_PREFIX}\n{custom_prompt}"
             negative_prompt = template.negative_prompt or cls.GLOBAL_NEGATIVE
         else:

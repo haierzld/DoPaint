@@ -88,15 +88,14 @@ async def generate_animation(
 
     # 提交阿里万象任务 + 后台轮询（改为全异步，避免阻塞HTTP请求）
     try:
-        # 构造图片公开URL：DashScope需要可公网访问的HTTP URL
+        # 图片URL：/_get_image_data会自动将/local/路径转为base64，HTTP URL直传
         raw_url = artwork.processed_url or artwork.original_url
-        image_url = _build_public_url(raw_url)
 
         # 先返回，后台线程负责提交 & 轮询
         background_tasks.add_task(
             _submit_and_poll,
             animation_id=animation.id,
-            image_url=image_url,
+            image_url=raw_url,
             prompt=prompt_data["prompt"],
             negative_prompt=prompt_data["negative_prompt"],
             duration=req.duration,
@@ -184,7 +183,7 @@ async def batch_generate(
 
         try:
             task_id = AIService.generate_video(
-                image_url=_build_public_url(artwork.processed_url or artwork.original_url),
+                image_url=artwork.processed_url or artwork.original_url,
                 prompt=prompt_data["prompt"],
                 negative_prompt=prompt_data["negative_prompt"],
                 duration=req.duration,
@@ -354,6 +353,9 @@ def _build_public_url(local_path: str) -> str:
     # 去掉可能的 local_storage/ 前缀
     if local_path.startswith("local_storage/"):
         local_path = local_path[len("local_storage/"):]
+    # 去掉可能的前导 /local/ 前缀（_save_local 返回的路径已含 /local/）
+    if local_path.startswith("/local/"):
+        local_path = local_path[len("/local/"):]
     return f"http://{settings.SELF_HOST}/local/{local_path}"
 
 

@@ -62,6 +62,8 @@ async def upload_artwork(
         source=source,
     )
 
+    is_duplicate = getattr(artwork, "is_duplicate", False)
+
     return success(
         data={
             "id": artwork.id,
@@ -73,6 +75,7 @@ async def upload_artwork(
             "source": artwork.source,
             "status": artwork.status,
             "created_at": artwork.created_at.isoformat() if artwork.created_at else "",
+            "is_duplicate": is_duplicate,
         }
     )
 
@@ -234,4 +237,5 @@ async def analyze_artwork(
     return success(data={
         "description": result["description"],
         "recommended_styles": styles_info,
+        "detected_animals": result.get("detected_animals", []),
     })

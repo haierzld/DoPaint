@@ -22,6 +22,7 @@ class Artwork(BaseModel):
     original_url = Column(String(500), nullable=False, comment="原始图片URL")
     processed_url = Column(String(500), comment="预处理后图片URL")
     thumbnail_url = Column(String(500), comment="缩略图URL")
+    image_hash = Column(String(64), index=True, comment="图片SHA256哈希，用于同租户去重")
 
     # 来源
     source = Column(

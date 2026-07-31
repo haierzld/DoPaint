@@ -232,7 +232,7 @@ def dev_login(req: DevLoginRequest):
                 wechat_openid=f"dev_{uuid.uuid4().hex[:12]}",
                 nickname=req.nickname,
                 role="individual",
-                personal_quota=9999,
+                personal_quota=10,
                 personal_plan="yearly",
             )
             db.add(user)
@@ -248,7 +248,7 @@ def dev_login(req: DevLoginRequest):
             "user_id": user.id,
             "nickname": user.nickname,
             "role": user.role,
-            "quota": user.personal_quota,
+            "remaining_quota": user.personal_quota - user.personal_used,
         })
     finally:
         db.close()

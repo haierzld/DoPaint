@@ -73,7 +73,7 @@ button { cursor: pointer; border: none; outline: none; font-family: inherit; }
 .recent-item.selected { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-light); }
 .recent-item img { width: 100%; height: 100%; object-fit: cover; }
 .recent-item .placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 28px; }
-.recent-item .delete-btn { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%; background: rgba(0,0,0,.5); color: #fff; font-size: 10px; display: none; align-items: center; justify-content: center; cursor: pointer; }
+.recent-item .delete-btn { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; border-radius: 50%; background: rgba(220,38,38,.85); color: #fff; font-size: 11px; display: none; align-items: center; justify-content: center; cursor: pointer; z-index: 5; line-height: 20px; }
 .recent-item:hover .delete-btn { display: flex; }
 .recent-add { flex-shrink: 0; width: 80px; height: 80px; border-radius: 10px; border: 2px dashed var(--border); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: .2s; font-size: 32px; color: var(--primary-light); }
 .recent-add:hover { border-color: var(--primary); background: #F0ECFF; color: var(--primary); }
@@ -370,6 +370,9 @@ let styleTemplates = [];
 let recentArtworks = []; // 最近10张画作
 let originalSystemPrompt = ''; // 风格原始提示词（用于比对是否修改）
 let currentCustomPrompt = '';  // 当前编辑中的提示词
+let currentAnalysisDesc = '';  // AI分析画作后的描述文本，用于生成定制提示词
+let currentDetectedAnimals = [];  // 分析检测到的动物列表 [{animal, sound_desc}, ...]
+let pendingStyleApply = null;  // 分析完成后需要应用的风格 {code, name, icon}
 
 // ==================== API Helpers ====================
 async function api(path, opts = {}) {
@@ -413,7 +416,7 @@ async function doLogin() {
     const data = await res.json();
     if (data.code === 0 && data.data) {
       token = data.data.access_token || data.data.token;
-      currentUser = data.data.user || { nickname: nick, quota_remaining: data.data.quota || 10 };
+      currentUser = data.data.user || { nickname: nick, remaining_quota: data.data.remaining_quota ?? 10 };
       nickname = nick;
       localStorage.setItem(TOKEN_KEY, token);
       localStorage.setItem(NICK_KEY, nick);
@@ -438,13 +441,26 @@ function showApp() {
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appScreen').style.display = '';
   document.getElementById('displayName').textContent = '👋 ' + nickname;
-  if (currentUser) {
-    document.getElementById('quotaBadge').textContent =
-      '剩余: ' + (currentUser.quota_remaining ?? currentUser.quota ?? 10);
-  }
+  refreshQuota();
   switchTab('create');
   loadStyles();
   loadRecentArtworks();
+}
+
+async function refreshQuota() {
+  try {
+    const data = await api('/api/v1/auth/me');
+    if (data.code === 0 && data.data) {
+      currentUser = data.data;
+      document.getElementById('quotaBadge').textContent =
+        '剩余: ' + (data.data.remaining_quota ?? data.data.personal_quota ?? 10);
+    } else {
+      document.getElementById('quotaBadge').textContent =
+        '剩余: ' + (currentUser?.remaining_quota ?? currentUser?.personal_quota ?? 10);
+    }
+  } catch (e) {
+    // 获取失败保持现有显示
+  }
 }
 
 // ==================== Tabs ====================
@@ -476,6 +492,8 @@ function selectFile(file) {
     showAlert('请选择图片文件'); return;
   }
   selectedFile = file;
+  currentAnalysisDesc = '';  // 新文件，重置分析
+  currentDetectedAnimals = [];
   const reader = new FileReader();
   reader.onload = e => {
     document.getElementById('previewImg').src = e.target.result;
@@ -503,7 +521,11 @@ async function uploadArtwork() {
       currentArtworkUrl = data.data.original_url;
       currentArtworkTitle = data.data.title || '';
       document.getElementById('uploadStatus').style.display = 'block';
-      document.getElementById('uploadStatus').innerHTML = '<span style="color:var(--success)">✅ 上传成功！</span>';
+      if (data.data.is_duplicate) {
+        document.getElementById('uploadStatus').innerHTML = '<span style="color:var(--primary)">♻️ 检测到重复图片，已从库中直接返回</span>';
+      } else {
+        document.getElementById('uploadStatus').innerHTML = '<span style="color:var(--success)">✅ 上传成功！</span>';
+      }
       document.getElementById('generatePanel').style.display = '';
       updateGenerateButton();
       loadRecentArtworks();
@@ -545,6 +567,13 @@ async function analyzeAndRecommend(artworkId) {
       const rawDesc = data.data.description || '';
       // 去除 Markdown 格式，转纯文本
       const plain = stripMarkdown(rawDesc);
+      // 保存分析描述，供后续智能提示词使用
+      currentAnalysisDesc = plain;
+      // 保存检测到的动物列表
+      currentDetectedAnimals = data.data.detected_animals || [];
+      if (currentDetectedAnimals.length > 0) {
+        console.log('检测到动物:', currentDetectedAnimals.map(a => a.animal).join('、'));
+      }
       // 摘要：50-100 字
       const summary = plain.length > 100 ? plain.slice(0, 100) + '...' : plain;
       // 完整内容分段展示
@@ -568,12 +597,29 @@ async function analyzeAndRecommend(artworkId) {
           const tag = document.createElement('span');
           tag.className = 'recommend-tag';
           tag.textContent = (s.icon || '') + ' ' + s.style_name;
-          tag.onclick = () => selectStyle(s.style_code, s.style_name, s.icon);
+          tag.onclick = () => {
+            selectStyle(s.style_code, s.style_name, s.icon);
+            // 自动用分析描述 + 风格生成定制提示词
+            if (currentAnalysisDesc) {
+              const merged = buildStylePrompt(s.style_code, s.style_name);
+              document.getElementById('customPromptInput').value = merged;
+              currentCustomPrompt = merged;
+              document.getElementById('btnResetPrompt').style.display = '';
+            }
+          };
           tagsEl.appendChild(tag);
         });
       }
     } else {
       banner.classList.remove('active');
+    }
+
+    // 分析完成 → 如果有等待应用的风格，重新应用以融合分析结果
+    if (pendingStyleApply) {
+      const p = pendingStyleApply;
+      pendingStyleApply = null;
+      // 此时 currentAnalysisDesc 已有值，selectStyle 会自动融合
+      selectStyle(p.code, p.name, p.icon);
     }
   } catch (e) {
     banner.classList.remove('active');
@@ -645,6 +691,8 @@ function selectRecentArtwork(id, url, title) {
   currentArtworkUrl = url;
   currentArtworkTitle = title || '';
   selectedFile = null;
+  currentAnalysisDesc = '';  // 重置分析结果
+  currentDetectedAnimals = [];  // 重置动物检测
 
   // Update preview
   document.getElementById('previewImg').src = url;
@@ -655,6 +703,9 @@ function selectRecentArtwork(id, url, title) {
   document.getElementById('uploadStatus').innerHTML = '<span style="color:var(--primary)">📂 已选择历史画作</span>';
   document.getElementById('generatePanel').style.display = '';
   updateGenerateButton();
+
+  // 自动触发分析（如果之前没有分析过）
+  analyzeAndRecommend(id);
 
   // Update selected status in grid
   renderRecentArtworks();
@@ -725,6 +776,34 @@ function toggleQuickPicker() {
   }
 }
 
+function buildStylePrompt(styleCode, styleName) {
+  // 将画作分析描述与选中风格融合，生成定制提示词
+  const desc = currentAnalysisDesc || '幼儿园小朋友的画作';
+  const phrases = {
+    magic_fairytale:   '请将上述画作场景，转化为一个温暖梦幻的童话世界。添加柔和的魔法光效与飘浮的精灵光点，让角色如同在故事书中栩栩如生。',
+    nature_wonder:     '请将上述画作场景，融入生机勃勃的自然世界。添加微风拂过树木、花朵轻轻绽放、蝴蝶翩跹飞舞的动画效果。',
+    festival_celebration: '请将上述画作中的元素，融入欢乐的节日庆典氛围。添加彩色飘带、飞舞的气泡和闪烁的灯光，让画面充满喜悦与活力。',
+    ocean_world:       '请将上述画作场景，带入神秘美丽的海底世界。添加水波流动、鱼群穿梭、光线在水中折射的梦幻海洋效果。',
+    space_adventure:   '请将上述画作场景，带入浩瀚神奇的太空世界。添加星星闪烁、星云流转、飞船穿梭于星河之间的奇幻效果。',
+    animal_kingdom:    '请将上述画作中的角色或元素，变成活泼可爱的小动物。添加动物们跳跃、摇摆、互动的生动动画表现。',
+    four_seasons:      '请将上述画作场景融入四季变换的魔法。画面依次展现春芽破土、夏花盛开、秋叶飘落、冬雪纷飞的流转之美。',
+    custom_pro:        '请将上述画作转化为流畅自然的动画，保留原有笔触和色彩风格，添加柔和的动态效果。',
+  };
+  const phrase = phrases[styleCode] || '请将上述画作转化为流畅自然的动画，在原有风格基础上添加生动有趣的动态效果。';
+
+  // 构建动物音效增强部分
+  let animalSoundSection = '';
+  if (currentDetectedAnimals && currentDetectedAnimals.length > 0) {
+    const soundDescs = currentDetectedAnimals.map(a => a.sound_desc).filter(Boolean);
+    if (soundDescs.length > 0) {
+      animalSoundSection = '\n\n【动物音效增强】请务必在动画中加入以下动物的声音和动作表现：\n' +
+        soundDescs.map((sd, i) => `${i + 1}. ${sd}`).join('\n');
+    }
+  }
+
+  return desc + '\n\n' + phrase + animalSoundSection;
+}
+
 function selectStyle(code, name, icon) {
   selectedStyleCode = code;
   document.getElementById('genStyleIcon').textContent = icon || '🎭';
@@ -735,9 +814,26 @@ function selectStyle(code, name, icon) {
   if (tmpl) {
     originalSystemPrompt = tmpl.system_prompt || '';
     const input = document.getElementById('customPromptInput');
-    input.value = originalSystemPrompt;
-    currentCustomPrompt = '';
-    document.getElementById('btnResetPrompt').style.display = 'none';
+
+    if (currentAnalysisDesc && currentArtworkId) {
+      // ✅ 有分析结果 → 融合分析描述 + 风格生成定制提示词
+      const merged = buildStylePrompt(code, name);
+      input.value = merged;
+      currentCustomPrompt = merged;
+      document.getElementById('btnResetPrompt').style.display = '';
+    } else if (currentArtworkId) {
+      // ⏳ 有画作但尚未分析 → 先用默认提示词，后台分析完后自动融合
+      input.value = originalSystemPrompt;
+      currentCustomPrompt = '';
+      document.getElementById('btnResetPrompt').style.display = 'none';
+      pendingStyleApply = { code, name, icon };
+      analyzeAndRecommend(currentArtworkId);
+    } else {
+      // 无画作 → 使用默认模板提示词
+      input.value = originalSystemPrompt;
+      currentCustomPrompt = '';
+      document.getElementById('btnResetPrompt').style.display = 'none';
+    }
   }
 
   // 显示提示词编辑器
@@ -891,6 +987,7 @@ async function pollAnimation(animationId) {
           const styleName = styleTemplates.find(s => s.style_code === selectedStyleCode)?.style_name || selectedStyleCode;
           showResultPreview(videoUrl, styleName);
           document.getElementById('btnGenerate').style.display = 'none';
+          refreshQuota();
           loadGallery();
           return;
         } else if (s === 'failed') {

@@ -1,8 +1,10 @@
 """
 画作服务
 - 上传、预处理、存储（OSS / 本地降级）
+- 同租户图片去重（SHA256 哈希）
 """
 from __future__ import annotations
+import hashlib
 import os
 import uuid
 from io import BytesIO
@@ -37,8 +39,38 @@ class ArtworkService:
         source: str = "camera",
     ) -> Artwork:
         """
-        上传画作 → 预处理 → 存储 → 写入数据库
+        上传画作 → 同租户去重 → 预处理 → 存储 → 写入数据库
+        如果同租户下已存在相同图片（SHA256 匹配），直接返回已有画作
         """
+        # 0. 计算图片哈希，同租户去重检查
+        image_hash = hashlib.sha256(image_data).hexdigest()
+
+        if org_id is not None:
+            existing = (
+                self.db.query(Artwork)
+                .filter(
+                    Artwork.org_id == org_id,
+                    Artwork.image_hash == image_hash,
+                )
+                .first()
+            )
+        else:
+            # 无机构时按用户去重
+            existing = (
+                self.db.query(Artwork)
+                .filter(
+                    Artwork.user_id == user_id,
+                    Artwork.org_id.is_(None),
+                    Artwork.image_hash == image_hash,
+                )
+                .first()
+            )
+
+        if existing:
+            logger.info(f"发现重复图片，hash={image_hash[:16]}...，返回已有画作 id={existing.id}")
+            existing.is_duplicate = True
+            return existing
+
         file_id = uuid.uuid4().hex[:12]
         ext = "jpg"
 
@@ -76,6 +108,7 @@ class ArtworkService:
             original_url=original_url,
             processed_url=processed_url,
             thumbnail_url=thumb_url,
+            image_hash=image_hash,
             source=source,
             status="completed",
         )
@@ -83,6 +116,7 @@ class ArtworkService:
         self.db.commit()
         self.db.refresh(artwork)
 
+        artwork.is_duplicate = False
         return artwork
 
     def _store(self, key: str, data: bytes) -> str:
