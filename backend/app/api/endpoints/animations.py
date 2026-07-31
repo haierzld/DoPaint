@@ -1,0 +1,474 @@
+"""
+动画接口
+POST   /api/v1/animations/generate       - 生成动画
+POST   /api/v1/animations/batch-generate - 批量生成
+GET    /api/v1/animations/{id}/status    - 查询状态
+GET    /api/v1/animations                - 动画列表
+POST   /api/v1/animations/{id}/retry     - 重试失败任务
+"""
+from fastapi import APIRouter, Depends, BackgroundTasks
+from sqlalchemy.orm import Session
+from loguru import logger
+
+from app.core.deps import get_db, get_current_user, check_quota
+from app.core.config import settings
+from app.schemas.animation import (
+    AnimationGenerateRequest,
+    AnimationBatchRequest,
+)
+from app.services.ai_service import AIService
+from app.services.quota_service import QuotaService
+from app.models.animation import Animation
+from app.models.artwork import Artwork
+from app.models.prompt_template import PromptTemplate
+from app.models.user import User
+from app.utils.prompt_builder import PromptBuilder
+from app.utils.response import success, paginated, error
+
+router = APIRouter()
+
+
+@router.post("/generate", summary="生成动画")
+async def generate_animation(
+    req: AnimationGenerateRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(check_quota),
+    db: Session = Depends(get_db),
+):
+    """
+    将画作生成动画
+
+    流程：
+    1. 校验画作是否存在
+    2. 获取提示词模板
+    3. 组装 prompt
+    4. 消耗配额
+    5. 提交阿里万象任务
+    6. 返回 animation_id，后台轮询结果
+    """
+    # 校验画作
+    artwork = db.query(Artwork).filter(
+        Artwork.id == req.artwork_id,
+    ).first()
+    if not artwork:
+        return error("画作不存在", code=404)
+
+    # 获取提示词模板
+    template = db.query(PromptTemplate).filter(
+        PromptTemplate.style_code == req.style_code,
+        PromptTemplate.status == 1,
+    ).first()
+    if not template:
+        return error(f"风格 '{req.style_code}' 不存在", code=404)
+
+    # 组装提示词
+    prompt_data = PromptBuilder.build(
+        template=template,
+        custom_prompt=req.custom_prompt,
+        duration=req.duration,
+        resolution=req.resolution,
+    )
+
+    # 创建动画记录
+    animation = Animation(
+        artwork_id=artwork.id,
+        user_id=current_user.id,
+        org_id=current_user.org_id,
+        prompt_style=req.style_code,
+        custom_prompt=req.custom_prompt,
+        final_prompt=prompt_data["prompt"],
+        negative_prompt=prompt_data["negative_prompt"],
+        duration=req.duration,
+        resolution=req.resolution,
+        status="queued",
+    )
+    db.add(animation)
+    db.commit()
+    db.refresh(animation)
+
+    # 提交阿里万象任务 + 后台轮询（改为全异步，避免阻塞HTTP请求）
+    try:
+        # 构造图片公开URL：DashScope需要可公网访问的HTTP URL
+        raw_url = artwork.processed_url or artwork.original_url
+        image_url = _build_public_url(raw_url)
+
+        # 先返回，后台线程负责提交 & 轮询
+        background_tasks.add_task(
+            _submit_and_poll,
+            animation_id=animation.id,
+            image_url=image_url,
+            prompt=prompt_data["prompt"],
+            negative_prompt=prompt_data["negative_prompt"],
+            duration=req.duration,
+            resolution=req.resolution,
+            custom_prompt=req.custom_prompt,
+        )
+
+    except Exception as e:
+        logger.error(f"添加后台任务异常: {e}")
+        animation.status = "failed"
+        animation.error_msg = str(e)
+        db.commit()
+        return error("生成失败，请稍后重试")
+
+    # 消耗配额
+    quota_svc = QuotaService(db)
+    quota_svc.consume(current_user, count=1)
+
+    return success(
+        data={
+            "animation_id": animation.id,
+            "artwork_id": artwork.id,
+            "status": animation.status,
+            "estimated_seconds": 30,
+        }
+    )
+
+
+@router.post("/batch-generate", summary="批量生成动画")
+async def batch_generate(
+    req: AnimationBatchRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(check_quota),
+    db: Session = Depends(get_db),
+):
+    """
+    批量生成（最多30幅）
+
+    用于全班画作统一风格批量处理
+    """
+    count = len(req.artwork_ids)
+    if count > 30 or count < 1:
+        return error("每次批量生成 1-30 幅画作")
+
+    # 配额检查
+    quota_svc = QuotaService(db)
+    if quota_svc.get_remaining(current_user) < count:
+        return error(f"配额不足，需要 {count} 次，当前剩余配额不足")
+
+    # 获取模板
+    template = db.query(PromptTemplate).filter(
+        PromptTemplate.style_code == req.style_code,
+        PromptTemplate.status == 1,
+    ).first()
+    if not template:
+        return error(f"风格不存在")
+
+    prompt_data = PromptBuilder.build(
+        template=template,
+        custom_prompt=req.custom_prompt,
+        duration=req.duration,
+        resolution=req.resolution,
+    )
+
+    results = []
+    for artwork_id in req.artwork_ids:
+        artwork = db.query(Artwork).filter(Artwork.id == artwork_id).first()
+        if not artwork:
+            results.append({"artwork_id": artwork_id, "error": "画作不存在"})
+            continue
+
+        animation = Animation(
+            artwork_id=artwork_id,
+            user_id=current_user.id,
+            org_id=current_user.org_id,
+            prompt_style=req.style_code,
+            final_prompt=prompt_data["prompt"],
+            negative_prompt=prompt_data["negative_prompt"],
+            duration=req.duration,
+            resolution=req.resolution,
+            status="queued",
+        )
+        db.add(animation)
+        db.flush()
+
+        try:
+            task_id = AIService.generate_video(
+                image_url=_build_public_url(artwork.processed_url or artwork.original_url),
+                prompt=prompt_data["prompt"],
+                negative_prompt=prompt_data["negative_prompt"],
+                duration=req.duration,
+                resolution=req.resolution,
+            )
+            if task_id:
+                animation.ai_task_id = task_id
+                animation.status = "generating"
+                background_tasks.add_task(
+                    _poll_and_update, animation_id=animation.id, task_id=task_id
+                )
+            else:
+                animation.status = "failed"
+                animation.error_msg = "AI服务提交失败"
+            results.append({"artwork_id": artwork_id, "animation_id": animation.id})
+        except Exception as e:
+            animation.status = "failed"
+            animation.error_msg = str(e)
+            results.append({"artwork_id": artwork_id, "error": str(e)})
+
+    db.commit()
+
+    # 批量消耗配额
+    quota_svc.consume(current_user, count=len(req.artwork_ids))
+
+    return success(
+        data={"total": count, "results": results}
+    )
+
+
+@router.get("/{animation_id}/status", summary="查询动画状态")
+async def get_animation_status(
+    animation_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """查询动画生成状态（前端轮询此接口）"""
+    anim = db.query(Animation).filter(Animation.id == animation_id).first()
+    if not anim:
+        return error("动画记录不存在", code=404)
+
+    return success(
+        data={
+            "animation_id": anim.id,
+            "artwork_id": anim.artwork_id,
+            "status": anim.status,
+            "video_url": anim.video_url,
+            "thumbnail_url": anim.thumbnail_url,
+            "duration": anim.duration,
+            "resolution": anim.resolution,
+            "prompt_style": anim.prompt_style,
+            "error_msg": anim.error_msg,
+            "created_at": anim.created_at.isoformat() if anim.created_at else "",
+            "completed_at": anim.completed_at.isoformat() if anim.completed_at else None,
+        }
+    )
+
+
+@router.get("", summary="动画列表")
+async def list_animations(
+    page: int = 1,
+    page_size: int = 20,
+    status: str = None,
+    style: str = None,
+    artwork_id: int = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """分页查询动画列表"""
+    from sqlalchemy.orm import joinedload
+
+    query = db.query(Animation).options(joinedload(Animation.artwork))
+
+    if current_user.org_id:
+        query = query.filter(Animation.org_id == current_user.org_id)
+    else:
+        query = query.filter(Animation.user_id == current_user.id)
+
+    if status:
+        query = query.filter(Animation.status == status)
+    if style:
+        query = query.filter(Animation.prompt_style == style)
+    if artwork_id:
+        query = query.filter(Animation.artwork_id == artwork_id)
+
+    total = query.count()
+    animations = (
+        query.order_by(Animation.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    items = []
+    for anim in animations:
+        artwork = anim.artwork if hasattr(anim, 'artwork') else None
+        items.append({
+            "id": anim.id,
+            "artwork_id": anim.artwork_id,
+            "artwork_title": artwork.title if artwork else None,
+            "artwork_thumbnail": artwork.thumbnail_url if artwork else None,
+            "artwork_original_url": artwork.original_url if artwork else None,
+            "author_name": artwork.author_name if artwork else None,
+            "prompt_style": anim.prompt_style,
+            "video_url": anim.video_url,
+            "thumbnail_url": anim.thumbnail_url,
+            "duration": anim.duration,
+            "status": anim.status,
+            "created_at": anim.created_at.isoformat() if anim.created_at else "",
+        })
+
+    return paginated(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.post("/{animation_id}/retry", summary="重试失败任务")
+async def retry_animation(
+    animation_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """重新生成失败的动画"""
+    anim = db.query(Animation).filter(
+        Animation.id == animation_id, Animation.status == "failed"
+    ).first()
+    if not anim:
+        return error("只能重试失败的任务")
+
+    artwork = db.query(Artwork).filter(Artwork.id == anim.artwork_id).first()
+    if not artwork:
+        return error("关联画作不存在")
+
+    anim.status = "queued"
+    anim.error_msg = None
+    anim.retry_count += 1
+    db.commit()
+
+    task_id = AIService.generate_video(
+        image_url=_build_public_url(artwork.processed_url or artwork.original_url),
+        prompt=anim.final_prompt,
+        negative_prompt=anim.negative_prompt or "",
+        duration=anim.duration,
+        resolution=anim.resolution,
+    )
+
+    if task_id:
+        anim.ai_task_id = task_id
+        anim.status = "generating"
+        db.commit()
+        background_tasks.add_task(
+            _poll_and_update, animation_id=anim.id, task_id=task_id
+        )
+    else:
+        anim.status = "failed"
+        anim.error_msg = "AI服务提交失败"
+        db.commit()
+
+    return success(data={"animation_id": anim.id, "status": anim.status})
+
+
+# ==================== 辅助函数 ====================
+
+def _build_public_url(local_path: str) -> str:
+    """将本地存储路径转换为可公网访问的HTTP URL"""
+    if local_path.startswith("http://") or local_path.startswith("https://"):
+        return local_path
+    # 去掉可能的 local_storage/ 前缀
+    if local_path.startswith("local_storage/"):
+        local_path = local_path[len("local_storage/"):]
+    return f"http://{settings.SELF_HOST}/local/{local_path}"
+
+
+# ==================== 后台任务 ====================
+
+def _submit_and_poll(
+    animation_id: int,
+    image_url: str,
+    prompt: str,
+    negative_prompt: str = "",
+    duration: int = 5,
+    resolution: str = "720p",
+    custom_prompt: str = None,
+):
+    """
+    后台任务：提交 DashScope 任务 + 轮询结果
+    - Step1: 调用 AIService.generate_video()（约40秒）
+    - Step2: 更新 AI task_id → status=generating
+    - Step3: 轮询直到完成
+    """
+    from app.models.base import SessionLocal
+
+    db = SessionLocal()
+    try:
+        logger.info(f"[后台] 正在提交AI任务 animation_id={animation_id}")
+
+        # Step1: 提交AI任务（可能耗时40秒+）
+        task_id = AIService.generate_video(
+            image_url=image_url,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            duration=duration,
+            resolution=resolution,
+        )
+
+        anim = db.query(Animation).filter(Animation.id == animation_id).first()
+        if not anim:
+            return
+
+        if task_id:
+            # Step2: 更新状态为 generating
+            anim.ai_task_id = task_id
+            anim.status = "generating"
+            if custom_prompt:
+                anim.custom_prompt = custom_prompt
+            db.commit()
+            logger.info(f"[后台] AI任务提交成功 task_id={task_id}")
+
+            # Step3: 轮询任务结果
+            result = AIService.poll_task(task_id, max_wait=180)
+
+            # 重新查询（上面的轮询可能很久）
+            db.refresh(anim)
+
+            if result and "error" not in result:
+                anim.video_url = result.get("video_url")
+                anim.status = "completed"
+                anim.completed_at = __import__("datetime").datetime.utcnow()
+                logger.info(f"[后台] 动画 {animation_id} 生成成功")
+            else:
+                anim.status = "failed"
+                anim.error_msg = result.get("error", "未知错误") if result else "轮询超时"
+                logger.error(f"[后台] 动画 {animation_id} 生成失败: {anim.error_msg}")
+        else:
+            anim.status = "failed"
+            anim.error_msg = "AI服务提交失败（返回空task_id）"
+            db.commit()
+            logger.error(f"[后台] 动画 {animation_id} AI提交失败")
+
+        db.commit()
+
+    except Exception as e:
+        logger.error(f"[后台] 提交/轮询任务异常: {e}")
+        try:
+            anim = db.query(Animation).filter(Animation.id == animation_id).first()
+            if anim:
+                anim.status = "failed"
+                anim.error_msg = str(e)
+                db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
+def _poll_and_update(animation_id: int, task_id: str):
+    """后台轮询AI任务结果并更新数据库"""
+    from app.models.base import SessionLocal
+
+    db = SessionLocal()
+    try:
+        result = AIService.poll_task(task_id, max_wait=120)
+
+        anim = db.query(Animation).filter(Animation.id == animation_id).first()
+        if not anim:
+            return
+
+        if result and "error" not in result:
+            anim.video_url = result.get("video_url")
+            anim.status = "completed"
+            anim.completed_at = __import__("datetime").datetime.utcnow()
+            logger.info(f"动画 {animation_id} 生成成功")
+        else:
+            anim.status = "failed"
+            anim.error_msg = result.get("error", "未知错误") if result else "超时"
+            logger.error(f"动画 {animation_id} 生成失败: {anim.error_msg}")
+
+        db.commit()
+
+    except Exception as e:
+        logger.error(f"轮询任务异常: {e}")
+        anim = db.query(Animation).filter(Animation.id == animation_id).first()
+        if anim:
+            anim.status = "failed"
+            anim.error_msg = str(e)
+            db.commit()
+    finally:
+        db.close()

@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DoPaint - 幼儿画作动画生成器</title>
+<style>
+:root {
+  --primary: #6C5CE7; --primary-light: #A29BFE; --accent: #FD79A8;
+  --bg: #F8F7FF; --card: #FFFFFF; --text: #2D3436; --text-light: #636E72;
+  --border: #E8E5FF; --success: #00B894; --radius: 16px; --shadow: 0 4px 24px rgba(108,92,231,0.08);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+button { cursor: pointer; border: none; outline: none; font-family: inherit; }
+
+/* ---- Layout ---- */
+.app-header { background: linear-gradient(135deg, var(--primary), var(--primary-light)); color: #fff; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+.app-header h1 { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.app-header h1 span { font-size: 26px; }
+.user-info { display: flex; align-items: center; gap: 12px; font-size: 13px; }
+.user-info .badge { background: rgba(255,255,255,.2); padding: 4px 12px; border-radius: 20px; }
+.user-info .btn-logout { background: rgba(255,255,255,.15); color: #fff; padding: 6px 16px; border-radius: 20px; font-size: 13px; }
+.container { max-width: 640px; margin: 0 auto; padding: 20px 16px 100px; }
+
+/* ---- Tabs ---- */
+.tabs { display: flex; background: var(--card); border-radius: var(--radius); padding: 4px; margin-bottom: 20px; box-shadow: var(--shadow); }
+.tab-btn { flex: 1; padding: 12px; border-radius: 12px; font-size: 14px; font-weight: 600; color: var(--text-light); background: transparent; transition: all .25s; }
+.tab-btn.active { background: var(--primary); color: #fff; box-shadow: 0 4px 12px rgba(108,92,231,.3); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ---- Upload ---- */
+.upload-card { background: var(--card); border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow); margin-bottom: 16px; }
+.upload-area { border: 2px dashed var(--border); border-radius: 12px; padding: 40px 20px; text-align: center; transition: .3s; cursor: pointer; }
+.upload-area:hover, .upload-area.dragover { border-color: var(--primary); background: #F0ECFF; }
+.upload-icon { font-size: 48px; margin-bottom: 12px; }
+.upload-text { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+.upload-hint { font-size: 12px; color: var(--text-light); }
+.upload-preview { display: none; text-align: center; padding: 12px 0; }
+.upload-preview.active { display: block; }
+.upload-preview img { max-width: 100%; max-height: 300px; border-radius: 12px; object-fit: contain; }
+.upload-actions { display: flex; gap: 12px; margin-top: 16px; justify-content: center; }
+.upload-actions button { padding: 10px 24px; border-radius: 24px; font-size: 14px; font-weight: 600; }
+.btn-reupload { background: var(--border); color: var(--text); }
+.btn-submit { background: var(--primary); color: #fff; }
+.btn-submit:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ---- Recommend Banner ---- */
+.recommend-banner { background: linear-gradient(135deg, #FFF3E0, #FFF8E1); border: 1px solid #FFE0B2; border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; display: none; align-items: flex-start; gap: 10px; }
+.recommend-banner.active { display: flex; }
+.recommend-icon { font-size: 24px; flex-shrink: 0; }
+.recommend-content { flex: 1; }
+.recommend-text { font-size: 13px; color: #E65100; margin-bottom: 8px; line-height: 1.6; }
+.recommend-summary { font-weight: 500; }
+.recommend-full { display: none; margin-top: 8px; padding: 10px 12px; background: rgba(255,255,255,.7); border-radius: 10px; color: #BF360C; font-size: 12.5px; line-height: 1.8; }
+.recommend-full p { margin: 0 0 6px; }
+.recommend-text.expanded .recommend-full { display: block; }
+.btn-more { display: inline-block; margin-top: 6px; padding: 3px 12px; background: transparent; border: 1px solid #FFB74D; color: #E65100; font-size: 12px; border-radius: 16px; cursor: pointer; transition: .2s; }
+.btn-more:hover { background: #FF9800; color: #fff; border-color: #FF9800; }
+.recommend-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+.recommend-tag { background: #fff; border: 1px solid #FFB74D; color: #E65100; padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; cursor: pointer; transition: .2s; }
+.recommend-tag:hover { background: #FF9800; color: #fff; border-color: #FF9800; }
+.recommend-desc { font-size: 12px; color: #BF360C; margin-top: 4px; font-style: italic; }
+
+/* ---- Recent Artworks ---- */
+.recent-section { margin-bottom: 16px; }
+.recent-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.recent-title .count { font-size: 12px; color: var(--text-light); font-weight: 400; }
+.recent-grid { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.recent-item { flex-shrink: 0; width: 80px; height: 80px; border-radius: 10px; overflow: hidden; border: 2px solid transparent; cursor: pointer; transition: .2s; position: relative; background: var(--border); }
+.recent-item:hover { border-color: var(--primary-light); transform: scale(1.05); }
+.recent-item.selected { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-light); }
+.recent-item img { width: 100%; height: 100%; object-fit: cover; }
+.recent-item .placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 28px; }
+.recent-item .delete-btn { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%; background: rgba(0,0,0,.5); color: #fff; font-size: 10px; display: none; align-items: center; justify-content: center; cursor: pointer; }
+.recent-item:hover .delete-btn { display: flex; }
+.recent-add { flex-shrink: 0; width: 80px; height: 80px; border-radius: 10px; border: 2px dashed var(--border); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: .2s; font-size: 32px; color: var(--primary-light); }
+.recent-add:hover { border-color: var(--primary); background: #F0ECFF; color: var(--primary); }
+
+/* ---- Style Selection ---- */
+.style-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+.style-card { background: var(--card); border-radius: 12px; padding: 14px 8px; text-align: center; border: 2px solid transparent; cursor: pointer; transition: .25s; box-shadow: var(--shadow); }
+.style-card:hover { border-color: var(--primary-light); transform: translateY(-2px); }
+.style-card.selected { border-color: var(--primary); background: #F0ECFF; }
+.style-icon { font-size: 32px; margin-bottom: 6px; }
+.style-name { font-size: 12px; font-weight: 600; }
+
+/* ---- Generate ---- */
+.generate-card { background: var(--card); border-radius: var(--radius); padding: 20px 24px; box-shadow: var(--shadow); margin-bottom: 16px; }
+.generate-card .selected-style { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.generate-card .selected-icon { font-size: 36px; }
+.generate-card .selected-name { font-size: 16px; font-weight: 700; }
+.generate-card .switch-style { background: var(--border); color: var(--primary); padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; margin-left: auto; transition: .2s; }
+.generate-card .switch-style:hover { background: var(--primary-light); color: #fff; }
+.quick-picker { display: none; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 12px; box-shadow: var(--shadow); }
+.quick-picker.open { display: block; }
+.quick-picker .quick-grid { display: flex; gap: 8px; flex-wrap: wrap; }
+.quick-picker .quick-chip { padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; border: 1px solid var(--border); background: #fff; color: var(--text); cursor: pointer; transition: .2s; display: flex; align-items: center; gap: 6px; }
+.quick-picker .quick-chip:hover { border-color: var(--primary-light); background: #F0ECFF; }
+.quick-picker .quick-chip.active { border-color: var(--primary); background: #F0ECFF; color: var(--primary); }
+.btn-generate { width: 100%; padding: 16px; background: linear-gradient(135deg, var(--primary), var(--primary-light)); color: #fff; font-size: 16px; font-weight: 700; border-radius: 24px; transition: .3s; }
+/* Duration Selector */
+.duration-select { display: flex; align-items: center; justify-content: space-between; margin: 12px 0; padding: 10px 14px; background: #F8F7FF; border-radius: 12px; border: 1px solid var(--border); }
+.duration-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.duration-options { display: flex; gap: 6px; }
+.duration-option { padding: 6px 16px; border: 1.5px solid var(--border); border-radius: 20px; font-size: 13px; font-weight: 600; color: var(--text-light); cursor: pointer; background: #fff; transition: .2s; }
+.duration-option:hover { border-color: var(--primary-light); color: var(--primary); }
+.duration-option.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.btn-generate:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(108,92,231,.3); }
+.btn-generate:disabled { opacity: .5; transform: none; cursor: not-allowed; }
+/* Prompt Editor */
+.prompt-editor { margin: 12px 0; border: 1.5px solid var(--border); border-radius: 16px; overflow: hidden; transition: .2s; }
+.prompt-editor:focus-within { border-color: var(--primary); }
+.prompt-editor-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: #F8F7FF; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text); user-select: none; }
+.prompt-editor-header:hover { background: #F0ECFF; }
+.prompt-toggle { font-size: 11px; color: var(--text-light); transition: .2s; }
+.prompt-editor.open .prompt-toggle { transform: rotate(180deg); }
+.prompt-editor-body { display: none; padding: 0 16px 14px; }
+.prompt-editor.open .prompt-editor-body { display: block; }
+.prompt-editor textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border); font-size: 13px; line-height: 1.6; color: var(--text); background: #fff; resize: vertical; font-family: inherit; transition: .2s; min-height: 72px; }
+.prompt-editor textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(108,92,231,.1); }
+.prompt-hint { font-size: 11px; color: var(--text-light); margin-top: 6px; line-height: 1.5; }
+.btn-reset-prompt { margin-top: 8px; padding: 6px 14px; font-size: 12px; border-radius: 8px; border: 1px solid var(--border); color: var(--text-light); cursor: pointer; background: #fff; transition: .2s; }
+.btn-reset-prompt:hover { border-color: var(--primary-light); color: var(--primary); background: #F0ECFF; }
+.prompt-editor .style-icon { font-size: 16px; }
+.status-msg { text-align: center; margin-top: 12px; font-size: 14px; color: var(--text-light); }
+/* Result Preview */
+.result-preview { margin-top: 16px; padding: 16px; background: #F8F7FF; border-radius: 16px; border: 1.5px solid #D4CFFF; }
+.result-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.result-badge { background: #E6F9F0; color: #007A4D; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+.result-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.result-actions { display: flex; gap: 10px; margin-top: 12px; }
+.btn-result-download { flex: 1; text-align: center; padding: 10px 0; background: var(--primary); color: #fff; font-size: 13px; font-weight: 600; border-radius: 12px; text-decoration: none; transition: .2s; }
+.btn-result-download:hover { background: var(--primary-light); }
+.btn-result-new { flex: 1; padding: 10px 0; background: #fff; border: 1.5px solid var(--border); color: var(--text); font-size: 13px; font-weight: 600; border-radius: 12px; cursor: pointer; transition: .2s; }
+.btn-result-new:hover { border-color: var(--primary-light); color: var(--primary); }
+.status-msg .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: middle; margin-right: 6px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- Gallery ---- */
+.gallery-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.gallery-card { background: var(--card); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); cursor: pointer; }
+.gallery-thumb-wrap { position: relative; width: 100%; aspect-ratio: 4/3; background: #F0ECFF; border-radius: 12px 12px 0 0; overflow: hidden; }
+.gallery-thumb-fallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 40px; }
+.gallery-thumb { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: var(--border); }
+.gallery-info { padding: 10px 12px; }
+.gallery-title { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.gallery-meta { font-size: 11px; color: var(--text-light); }
+.gallery-status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+.status-done { background: #E6F9F0; color: var(--success); }
+.status-processing { background: #FFF3E0; color: #F39C12; }
+.status-failed { background: #FFE0E0; color: #E74C3C; }
+.gallery-empty { grid-column: span 2; text-align: center; padding: 40px 20px; color: var(--text-light); font-size: 14px; }
+.gallery-empty .empty-icon { font-size: 48px; margin-bottom: 12px; }
+.video-preview { width: 100%; border-radius: 8px; margin-top: 8px; }
+.btn-download { display: inline-block; padding: 6px 14px; background: var(--primary); color: #fff; border-radius: 16px; font-size: 12px; text-decoration: none; margin-top: 6px; }
+
+/* ---- Login ---- */
+.login-card { background: var(--card); border-radius: var(--radius); padding: 32px; max-width: 360px; margin: 60px auto; box-shadow: var(--shadow); text-align: center; }
+.login-card h2 { margin-bottom: 20px; }
+.login-card input { width: 100%; padding: 12px 16px; border: 1px solid var(--border); border-radius: 12px; font-size: 14px; margin-bottom: 12px; outline: none; }
+.login-card input:focus { border-color: var(--primary); }
+.btn-login { width: 100%; padding: 12px; background: var(--primary); color: #fff; font-size: 16px; font-weight: 600; border-radius: 12px; }
+
+/* ---- Alert ---- */
+.alert { padding: 12px 16px; border-radius: 10px; margin-bottom: 12px; font-size: 13px; display: none; }
+.alert.show { display: block; }
+.alert-success { background: #E6F9F0; color: #007A4D; }
+.alert-error { background: #FFE0E0; color: #C0392B; }
+.alert-info { background: #E8F0FE; color: #2C5282; }
+
+/* ---- Detail Modal ---- */
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 200; justify-content: center; align-items: center; }
+.modal-overlay.open { display: flex; }
+.modal-box { background: var(--card); border-radius: var(--radius); padding: 24px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; }
+.modal-box h3 { margin-bottom: 12px; }
+.modal-close { float: right; background: var(--border); padding: 4px 12px; border-radius: 16px; font-size: 13px; margin-bottom: 8px; }
+.gallery-detail h3 { margin-bottom: 4px; font-size: 18px; }
+.detail-time { font-size: 13px; color: var(--text-light); margin-bottom: 16px; }
+.detail-original { margin-bottom: 16px; }
+.detail-video { margin-bottom: 8px; }
+.detail-label { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+.btn-detail-download { display: inline-block; margin-top: 10px; padding: 8px 18px; background: var(--primary); color: #fff; border-radius: 12px; font-size: 13px; font-weight: 600; text-decoration: none; transition: .2s; }
+.btn-detail-download:hover { background: var(--primary-light); }
+
+/* Loading spinner */
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+.loading-text { animation: pulse 1.2s ease-in-out infinite; }
+</style>
+</head>
+<body>
+
+<!-- Login Screen -->
+<div id="loginScreen">
+  <div class="login-card">
+    <div style="font-size:48px;margin-bottom:8px;">🎨</div>
+    <h2>DoPaint</h2>
+    <p style="color:var(--text-light);margin-bottom:20px;font-size:14px;">幼儿画作动画生成器</p>
+    <div id="loginAlert" class="alert"></div>
+    <input id="nickname" placeholder="输入你的昵称" value="数智幼儿园">
+    <button class="btn-login" onclick="doLogin()">进入体验</button>
+  </div>
+</div>
+
+<!-- Main App (hidden until login) -->
+<div id="appScreen" style="display:none;">
+  <header class="app-header">
+    <h1><span>🎨</span> DoPaint</h1>
+    <div class="user-info">
+      <span id="displayName"></span>
+      <span class="badge" id="quotaBadge">剩余: 10</span>
+      <button class="btn-logout" onclick="logout()">退出</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="create" onclick="switchTab('create')">🎬 生成动画</button>
+      <button class="tab-btn" data-tab="styles" onclick="switchTab('styles')">🎭 选择风格</button>
+      <button class="tab-btn" data-tab="gallery" onclick="switchTab('gallery')">🖼️ 我的画廊</button>
+    </div>
+
+    <!-- Alert -->
+    <div id="alertBox" class="alert"></div>
+
+    <!-- ======= Tab: Create ======= -->
+    <div id="tab-create" class="tab-panel active">
+
+      <!-- Upload Card -->
+      <div class="upload-card" id="uploadCard">
+        <div class="upload-area" id="uploadArea"
+             onclick="document.getElementById('fileInput').click()"
+             ondragover="e=>{e.preventDefault();this.classList.add('dragover')}"
+             ondragleave="e=>{this.classList.remove('dragover')}"
+             ondrop="e=>{e.preventDefault();this.classList.remove('dragover');handleDrop(e)}">
+          <div class="upload-icon">📤</div>
+          <div class="upload-text">点击上传或拖拽画作</div>
+          <div class="upload-hint">支持 JPG / PNG，建议尺寸 ≥ 512px</div>
+        </div>
+        <div class="upload-preview" id="uploadPreview">
+          <img id="previewImg" alt="预览">
+        </div>
+        <div class="upload-actions" id="uploadActions" style="display:none;">
+          <button class="btn-reupload" onclick="document.getElementById('fileInput').click()">🔄 重新选择</button>
+          <button class="btn-submit" id="btnUpload" onclick="uploadArtwork()">✅ 确认上传</button>
+        </div>
+        <div style="display:none;" id="uploadStatus" class="status-msg" style="margin-top:8px;"></div>
+      </div>
+      <input type="file" id="fileInput" accept="image/*" onchange="handleFileSelect(event)" hidden>
+
+      <!-- Recommend Banner -->
+      <div class="recommend-banner" id="recommendBanner">
+        <span class="recommend-icon">💡</span>
+        <div class="recommend-content">
+          <div class="recommend-text" id="recommendText">
+            <div class="recommend-summary" id="recommendSummary"></div>
+            <div class="recommend-full" id="recommendFull"></div>
+            <button class="btn-more" id="btnMore" onclick="toggleRecommendDetail()" style="display:none;">更多 ▼</button>
+          </div>
+          <div class="recommend-desc" id="recommendDesc"></div>
+          <div class="recommend-tags" id="recommendTags"></div>
+        </div>
+      </div>
+
+      <!-- Recent Artworks -->
+      <div class="recent-section" id="recentSection" style="display:none;">
+        <div class="recent-title">📂 最近画作 <span class="count" id="recentCount"></span></div>
+        <div class="recent-grid" id="recentGrid"></div>
+      </div>
+
+      <!-- Generate Panel (appears after upload) -->
+      <div class="generate-card" id="generatePanel" style="display:none;">
+        <div class="selected-style">
+          <span class="selected-icon" id="genStyleIcon">🎭</span>
+          <span class="selected-name" id="genStyleName">未选择风格</span>
+          <button class="switch-style" id="switchStyleBtn" onclick="toggleQuickPicker()">↔ 切换风格</button>
+        </div>
+        <!-- Quick Picker -->
+        <div class="quick-picker" id="quickPicker"></div>
+
+        <!-- Editable Prompt -->
+        <div class="prompt-editor" id="promptEditor" style="display:none;">
+          <div class="prompt-editor-header" onclick="togglePromptEditor()">
+            <span>✏️ 编辑提示词</span>
+            <span class="prompt-toggle" id="promptToggle">展开 ▼</span>
+          </div>
+          <div class="prompt-editor-body" id="promptEditorBody">
+            <textarea id="customPromptInput" rows="4"
+              placeholder="输入自定义提示词，描述你想要的动画效果..."
+              oninput="onPromptEdited()"></textarea>
+            <div class="prompt-hint">
+              💡 修改后，AI 将使用你的描述来生成动画。保持为空则使用风格的默认提示词。
+            </div>
+            <button class="btn-reset-prompt" onclick="resetPrompt()" id="btnResetPrompt" style="display:none;">
+              🔄 恢复默认
+            </button>
+          </div>
+        </div>
+
+        <!-- Duration Selector -->
+        <div class="duration-select">
+          <span class="duration-label">⏱ 视频时长</span>
+          <div class="duration-options">
+            <button class="duration-option active" onclick="selectDuration(5, this)">5 秒</button>
+            <button class="duration-option" onclick="selectDuration(10, this)">10 秒</button>
+          </div>
+        </div>
+
+        <button class="btn-generate" id="btnGenerate" onclick="generateAnimation()" disabled>
+          ✨ 生成动画
+        </button>
+        <div class="status-msg" id="genStatus"></div>
+
+        <!-- Result Preview (shown after generation completes) -->
+        <div class="result-preview" id="resultPreview" style="display:none;">
+          <div class="result-header">
+            <span class="result-badge">✅ 生成成功</span>
+            <span class="result-title" id="resultTitle"></span>
+          </div>
+          <video class="result-video" id="resultVideo" controls playsinline
+                 style="width:100%;border-radius:12px;background:#000;" muted preload="none"></video>
+          <div class="result-actions">
+            <a class="btn-result-download" id="btnResultDownload" href="#" download target="_blank">
+              ⬇ 下载视频
+            </a>
+            <button class="btn-result-new" onclick="resetForNewGeneration()">
+              ✨ 再生成一个
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======= Tab: Styles ======= -->
+    <div id="tab-styles" class="tab-panel">
+      <div class="style-grid" id="styleGrid"></div>
+    </div>
+
+    <!-- ======= Tab: Gallery ======= -->
+    <div id="tab-gallery" class="tab-panel">
+      <div class="gallery-grid" id="galleryGrid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal()">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="closeModal()">✕ 关闭</button>
+    <div id="modalContent"></div>
+  </div>
+</div>
+
+<script>
+// ==================== State ====================
+const TOKEN_KEY = 'dopaint_token';
+const NICK_KEY = 'dopaint_nick';
+let token = '';
+let nickname = '';
+let currentUser = null;
+let selectedFile = null;
+let currentArtworkId = null;
+let currentArtworkUrl = null;
+let currentArtworkTitle = '';
+let selectedStyleCode = null;
+let selectedDuration = 5; // 视频时长：5s / 10s
+let styleTemplates = [];
+let recentArtworks = []; // 最近10张画作
+let originalSystemPrompt = ''; // 风格原始提示词（用于比对是否修改）
+let currentCustomPrompt = '';  // 当前编辑中的提示词
+
+// ==================== API Helpers ====================
+async function api(path, opts = {}) {
+  const headers = { ...opts.headers };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (!(opts.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+  }
+  // 60秒超时（生成请求需等待后台提交，轮询请求足够）
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+  try {
+    const res = await fetch(path, { ...opts, headers, signal: controller.signal });
+    return res.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function showAlert(msg, type = 'error') {
+  const el = document.getElementById('alertBox');
+  el.textContent = msg;
+  el.className = `alert alert-${type} show`;
+  setTimeout(() => el.classList.remove('show'), 4000);
+}
+function showLoginAlert(msg, type = 'error') {
+  const el = document.getElementById('loginAlert');
+  el.textContent = msg;
+  el.className = `alert alert-${type} show`;
+}
+
+// ==================== Auth ====================
+async function doLogin() {
+  const nick = document.getElementById('nickname').value.trim() || '小朋友';
+  try {
+    const res = await fetch('/api/v1/auth/dev-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nickname: nick }),
+    });
+    const data = await res.json();
+    if (data.code === 0 && data.data) {
+      token = data.data.access_token || data.data.token;
+      currentUser = data.data.user || { nickname: nick, quota_remaining: data.data.quota || 10 };
+      nickname = nick;
+      localStorage.setItem(TOKEN_KEY, token);
+      localStorage.setItem(NICK_KEY, nick);
+      showApp();
+    } else {
+      showLoginAlert(data.message || '登录失败');
+    }
+  } catch (e) {
+    showLoginAlert('网络错误: ' + e.message);
+  }
+}
+
+function logout() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(NICK_KEY);
+  token = ''; currentUser = null;
+  document.getElementById('loginScreen').style.display = '';
+  document.getElementById('appScreen').style.display = 'none';
+}
+
+function showApp() {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('appScreen').style.display = '';
+  document.getElementById('displayName').textContent = '👋 ' + nickname;
+  if (currentUser) {
+    document.getElementById('quotaBadge').textContent =
+      '剩余: ' + (currentUser.quota_remaining ?? currentUser.quota ?? 10);
+  }
+  switchTab('create');
+  loadStyles();
+  loadRecentArtworks();
+}
+
+// ==================== Tabs ====================
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+
+  const btn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+  if (btn) btn.classList.add('active');
+
+  const panel = document.getElementById('tab-' + tab);
+  if (panel) panel.classList.add('active');
+
+  if (tab === 'gallery') loadGallery();
+  if (tab === 'styles') renderStyleGrid();
+}
+
+// ==================== File Upload ====================
+function handleFileSelect(e) {
+  const file = e.target.files?.[0];
+  if (file) selectFile(file);
+}
+function handleDrop(e) {
+  const file = e.dataTransfer.files?.[0];
+  if (file) selectFile(file);
+}
+function selectFile(file) {
+  if (!file.type.startsWith('image/')) {
+    showAlert('请选择图片文件'); return;
+  }
+  selectedFile = file;
+  const reader = new FileReader();
+  reader.onload = e => {
+    document.getElementById('previewImg').src = e.target.result;
+    document.getElementById('uploadPreview').classList.add('active');
+    document.getElementById('uploadActions').style.display = 'flex';
+    document.getElementById('uploadArea').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+}
+
+async function uploadArtwork() {
+  if (!selectedFile) return;
+  const btn = document.getElementById('btnUpload');
+  btn.disabled = true; btn.textContent = '上传中...';
+
+  const form = new FormData();
+  form.append('file', selectedFile);
+  form.append('title', '画作_' + new Date().toLocaleTimeString());
+  form.append('source', 'album');
+
+  try {
+    const data = await api('/api/v1/artworks/upload', { method: 'POST', body: form });
+    if (data.code === 0 && data.data) {
+      currentArtworkId = data.data.id;
+      currentArtworkUrl = data.data.original_url;
+      currentArtworkTitle = data.data.title || '';
+      document.getElementById('uploadStatus').style.display = 'block';
+      document.getElementById('uploadStatus').innerHTML = '<span style="color:var(--success)">✅ 上传成功！</span>';
+      document.getElementById('generatePanel').style.display = '';
+      updateGenerateButton();
+      loadRecentArtworks();
+
+      // 自动分析画作推荐风格
+      analyzeAndRecommend(data.data.id);
+    } else {
+      showAlert(data.message || '上传失败');
+    }
+  } catch (e) {
+    showAlert('上传失败: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '✅ 确认上传';
+  }
+}
+
+// ==================== Style Recommendation ====================
+async function analyzeAndRecommend(artworkId) {
+  const banner = document.getElementById('recommendBanner');
+  const textEl = document.getElementById('recommendText');
+  const summaryEl = document.getElementById('recommendSummary');
+  const fullEl = document.getElementById('recommendFull');
+  const moreBtn = document.getElementById('btnMore');
+  const descEl = document.getElementById('recommendDesc');
+  const tagsEl = document.getElementById('recommendTags');
+
+  banner.classList.remove('active');
+  textEl.classList.remove('expanded');
+  summaryEl.innerHTML = '<span class="loading-text">🔍 正在分析画作内容...</span>';
+  fullEl.textContent = '';
+  moreBtn.style.display = 'none';
+  descEl.textContent = '';
+  tagsEl.innerHTML = '';
+  banner.classList.add('active');
+
+  try {
+    const data = await api(`/api/v1/artworks/${artworkId}/analyze`, { method: 'POST' });
+    if (data.code === 0 && data.data) {
+      const rawDesc = data.data.description || '';
+      // 去除 Markdown 格式，转纯文本
+      const plain = stripMarkdown(rawDesc);
+      // 摘要：50-100 字
+      const summary = plain.length > 100 ? plain.slice(0, 100) + '...' : plain;
+      // 完整内容分段展示
+      const paragraphs = rawDesc.split('\n').filter(p => p.trim());
+
+      summaryEl.textContent = '💡 ' + summary;
+      fullEl.innerHTML = paragraphs.map(p => {
+        const clean = stripMarkdown(p).trim();
+        return clean ? '<p>' + clean + '</p>' : '';
+      }).join('');
+
+      // 超过摘要长度才显示「更多」
+      if (plain.length > 100) {
+        moreBtn.style.display = '';
+      }
+
+      descEl.textContent = '';
+      if (data.data.recommended_styles && data.data.recommended_styles.length > 0) {
+        descEl.textContent = '👇 以下风格可能更适合这幅画，点击可直接选用：';
+        data.data.recommended_styles.forEach(s => {
+          const tag = document.createElement('span');
+          tag.className = 'recommend-tag';
+          tag.textContent = (s.icon || '') + ' ' + s.style_name;
+          tag.onclick = () => selectStyle(s.style_code, s.style_name, s.icon);
+          tagsEl.appendChild(tag);
+        });
+      }
+    } else {
+      banner.classList.remove('active');
+    }
+  } catch (e) {
+    banner.classList.remove('active');
+  }
+}
+
+function stripMarkdown(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '$1')   // **bold**
+    .replace(/\*(.+?)\*/g, '$1')         // *italic*
+    .replace(/^\s*[-\*]\s+/gm, '')      // - list items
+    .replace(/^\s*\d+\.\s+/gm, '')      // 1. numbered list
+    .replace(/^\s*#{1,6}\s+/gm, '')     // ### headings
+    .replace(/\[(.+?)\]\(.+?\)/g, '$1') // [link](url)
+    .replace(/`(.+?)`/g, '$1')           // `code`
+    .replace(/\n{2,}/g, '\n')            // collapse newlines
+    .trim();
+}
+
+function toggleRecommendDetail() {
+  const textEl = document.getElementById('recommendText');
+  const moreBtn = document.getElementById('btnMore');
+  const isExpanded = textEl.classList.toggle('expanded');
+  moreBtn.textContent = isExpanded ? '收起 ▲' : '更多 ▼';
+}
+
+// ==================== Recent Artworks ====================
+async function loadRecentArtworks() {
+  try {
+    const data = await api('/api/v1/artworks?page=1&page_size=10');
+    if (data.code === 0 && data.data) {
+      recentArtworks = data.data.items || [];
+      renderRecentArtworks();
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function renderRecentArtworks() {
+  const section = document.getElementById('recentSection');
+  const grid = document.getElementById('recentGrid');
+  const countEl = document.getElementById('recentCount');
+
+  // Always show the section
+  section.style.display = '';
+  countEl.textContent = recentArtworks.length > 0 ? `(${recentArtworks.length}幅)` : '(暂无画作)';
+
+  let html = `
+    <div class="recent-add" onclick="document.getElementById('fileInput').click()" title="上传新画作">
+      <span>+</span>
+    </div>`;
+
+  html += recentArtworks.slice(0, 9).map(a => {
+    const isSelected = currentArtworkId === a.id;
+    const thumbUrl = a.thumbnail_url || a.original_url || '';
+    return `
+      <div class="recent-item ${isSelected ? 'selected' : ''}"
+           onclick="selectRecentArtwork('${a.id}', '${thumbUrl}', '${(a.title || '').replace(/'/g, "\\'")}')" title="${a.title || '画作'}">
+        ${thumbUrl ? `<img src="${thumbUrl}" onerror="this.outerHTML='<span class=placeholder>🖼️</span>'">`
+                    : '<span class="placeholder">🖼️</span>'}
+        <span class="delete-btn" onclick="event.stopPropagation();deleteRecent('${a.id}')">✕</span>
+      </div>`;
+  }).join('');
+
+  grid.innerHTML = html;
+}
+
+function selectRecentArtwork(id, url, title) {
+  currentArtworkId = id;
+  currentArtworkUrl = url;
+  currentArtworkTitle = title || '';
+  selectedFile = null;
+
+  // Update preview
+  document.getElementById('previewImg').src = url;
+  document.getElementById('uploadPreview').classList.add('active');
+  document.getElementById('uploadActions').style.display = 'none';
+  document.getElementById('uploadArea').style.display = 'none';
+  document.getElementById('uploadStatus').style.display = 'block';
+  document.getElementById('uploadStatus').innerHTML = '<span style="color:var(--primary)">📂 已选择历史画作</span>';
+  document.getElementById('generatePanel').style.display = '';
+  updateGenerateButton();
+
+  // Update selected status in grid
+  renderRecentArtworks();
+}
+
+async function deleteRecent(id) {
+  try {
+    await api(`/api/v1/artworks/${id}`, { method: 'DELETE' });
+    recentArtworks = recentArtworks.filter(a => a.id !== id);
+    if (currentArtworkId === id) {
+      currentArtworkId = null;
+      currentArtworkUrl = null;
+      document.getElementById('generatePanel').style.display = 'none';
+      document.getElementById('uploadPreview').classList.remove('active');
+      document.getElementById('uploadArea').style.display = '';
+      document.getElementById('uploadActions').style.display = 'none';
+    }
+    renderRecentArtworks();
+  } catch (e) {
+    showAlert('删除失败');
+  }
+}
+
+// ==================== Style Selection ====================
+async function loadStyles() {
+  try {
+    const data = await api('/api/v1/prompts');
+    if (data.code === 0 && data.data) {
+      styleTemplates = data.data.items || data.data || [];
+      renderStyleGrid();
+      renderQuickPicker();
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function renderStyleGrid() {
+  const grid = document.getElementById('styleGrid');
+  if (!Array.isArray(styleTemplates) || styleTemplates.length === 0) {
+    grid.innerHTML = '<div class="gallery-empty" style="grid-column:span 4;"><div class="empty-icon">🎭</div>风格加载中...</div>';
+    return;
+  }
+  grid.innerHTML = styleTemplates.map(s => `
+    <div class="style-card ${selectedStyleCode === s.style_code ? 'selected' : ''}"
+         onclick="selectStyle('${s.style_code}', '${s.style_name}', '${s.style_icon || ''}')">
+      <div class="style-icon">${s.style_icon || '🎨'}</div>
+      <div class="style-name">${s.style_name}</div>
+    </div>
+  `).join('');
+}
+
+function renderQuickPicker() {
+  const picker = document.getElementById('quickPicker');
+  if (!Array.isArray(styleTemplates) || styleTemplates.length === 0) return;
+  picker.innerHTML = '<div class="quick-grid">' +
+    styleTemplates.map(s => `
+      <div class="quick-chip ${selectedStyleCode === s.style_code ? 'active' : ''}"
+           onclick="selectStyle('${s.style_code}', '${s.style_name}', '${s.style_icon || ''}')">
+        ${s.style_icon || '🎨'} ${s.style_name}
+      </div>
+    `).join('') + '</div>';
+}
+
+function toggleQuickPicker() {
+  const picker = document.getElementById('quickPicker');
+  picker.classList.toggle('open');
+  if (picker.classList.contains('open')) {
+    renderQuickPicker();
+  }
+}
+
+function selectStyle(code, name, icon) {
+  selectedStyleCode = code;
+  document.getElementById('genStyleIcon').textContent = icon || '🎭';
+  document.getElementById('genStyleName').textContent = name;
+
+  // 加载该风格的原始 system_prompt 到编辑器
+  const tmpl = styleTemplates.find(s => s.style_code === code);
+  if (tmpl) {
+    originalSystemPrompt = tmpl.system_prompt || '';
+    const input = document.getElementById('customPromptInput');
+    input.value = originalSystemPrompt;
+    currentCustomPrompt = '';
+    document.getElementById('btnResetPrompt').style.display = 'none';
+  }
+
+  // 显示提示词编辑器
+  const editor = document.getElementById('promptEditor');
+  editor.style.display = '';
+  editor.classList.remove('open');
+
+  // Update style grid
+  renderStyleGrid();
+  // Update quick picker
+  renderQuickPicker();
+  // Show picker briefly
+  const picker = document.getElementById('quickPicker');
+  if (picker.classList.contains('open')) {
+    setTimeout(() => picker.classList.remove('open'), 300);
+  }
+
+  updateGenerateButton();
+  showAlert('已选择风格: ' + name + ' (点击「编辑提示词」可修改)', 'success');
+}
+
+function updateGenerateButton() {
+  const btn = document.getElementById('btnGenerate');
+  btn.disabled = !(currentArtworkId && selectedStyleCode);
+}
+
+// ==================== Prompt Editor ====================
+function selectDuration(dur, btn) {
+  selectedDuration = dur;
+  document.querySelectorAll('.duration-option').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function togglePromptEditor() {
+  const editor = document.getElementById('promptEditor');
+  editor.classList.toggle('open');
+}
+
+function onPromptEdited() {
+  const input = document.getElementById('customPromptInput');
+  const val = input.value.trim();
+  if (val && val !== originalSystemPrompt) {
+    currentCustomPrompt = val;
+    document.getElementById('btnResetPrompt').style.display = '';
+  } else {
+    currentCustomPrompt = '';
+    document.getElementById('btnResetPrompt').style.display = 'none';
+  }
+}
+
+function resetPrompt() {
+  const input = document.getElementById('customPromptInput');
+  input.value = originalSystemPrompt;
+  currentCustomPrompt = '';
+  document.getElementById('btnResetPrompt').style.display = 'none';
+  showAlert('已恢复默认提示词', 'info');
+}
+
+// ==================== Result Preview ====================
+function showResultPreview(videoUrl, styleName) {
+  const preview = document.getElementById('resultPreview');
+  const videoEl = document.getElementById('resultVideo');
+  const titleEl = document.getElementById('resultTitle');
+  const downLink = document.getElementById('btnResultDownload');
+
+  if (!preview || !videoEl || !titleEl || !downLink) return;
+
+  preview.style.display = '';
+  videoEl.src = videoUrl;
+  videoEl.load();
+  titleEl.textContent = currentArtworkTitle || '动画生成';
+  downLink.href = videoUrl;
+  downLink.download = `${styleName}_${currentArtworkTitle || '动画'}.mp4`;
+
+  preview.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function resetForNewGeneration() {
+  const preview = document.getElementById('resultPreview');
+  const videoEl = document.getElementById('resultVideo');
+  if (preview) preview.style.display = 'none';
+  if (videoEl) videoEl.src = '';
+  const btn = document.getElementById('btnGenerate');
+  if (btn) { btn.style.display = ''; btn.disabled = false; btn.textContent = '✨ 生成动画'; }
+  currentVideoUrl = null;
+}
+
+// ==================== Generate Animation ====================
+async function generateAnimation() {
+  if (!currentArtworkId || !selectedStyleCode) {
+    showAlert('请先上传画作并选择风格'); return;
+  }
+
+  const btn = document.getElementById('btnGenerate');
+  const status = document.getElementById('genStatus');
+  btn.disabled = true;
+  btn.textContent = '⏳ 提交中...';
+  status.innerHTML = '<span class="spinner"></span>正在提交视频生成任务...';
+
+  try {
+    const body = {
+      artwork_id: Number(currentArtworkId),
+      style_code: selectedStyleCode,
+      duration: selectedDuration,
+    };
+    // 如果用户编辑了提示词，发送自定义版本
+    if (currentCustomPrompt) {
+      body.custom_prompt = currentCustomPrompt;
+    }
+    const data = await api('/api/v1/animations/generate', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+
+    if (data.code === 0 && data.data) {
+      const animationId = data.data.animation_id || data.data.id;
+      status.innerHTML = '<span class="spinner"></span>排队中，即将开始生成...';
+      await pollAnimation(animationId);
+    } else {
+      status.innerHTML = '';
+      showAlert(data.message || '生成失败');
+      btn.disabled = false;
+      btn.textContent = '✨ 生成动画';
+    }
+  } catch (e) {
+    status.innerHTML = '';
+    showAlert('生成失败: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = '✨ 生成动画';
+  }
+}
+
+async function pollAnimation(animationId) {
+  const status = document.getElementById('genStatus');
+  let attempts = 0;
+  const maxAttempts = 100; // 最多等 5 分钟（后端提交约40s + 生成约120s）
+
+  const timer = setInterval(async () => {
+    attempts++;
+    status.innerHTML = `<span class="spinner"></span>AI 正在创作中... (${attempts * 3}s)`;
+
+    try {
+      const data = await api(`/api/v1/animations/${animationId}/status`);
+      if (data.code === 0 && data.data) {
+        const s = data.data.status;
+        if (s === 'completed' || data.data.video_url) {
+          clearInterval(timer);
+          status.innerHTML = '';
+          // Show result preview right here
+          const videoUrl = data.data.video_url;
+          const styleName = styleTemplates.find(s => s.style_code === selectedStyleCode)?.style_name || selectedStyleCode;
+          showResultPreview(videoUrl, styleName);
+          document.getElementById('btnGenerate').style.display = 'none';
+          loadGallery();
+          return;
+        } else if (s === 'failed') {
+          clearInterval(timer);
+          status.innerHTML = '';
+          const errMsg = data.data.error_message || data.data.error || '未知错误';
+          showAlert('生成失败: ' + errMsg);
+          document.getElementById('btnGenerate').disabled = false;
+          document.getElementById('btnGenerate').textContent = '✨ 生成动画';
+          return;
+        } else if (s === 'queued') {
+          status.innerHTML = `<span class="spinner"></span>正在向AI提交任务，请稍候... (${attempts * 3}s)`;
+        } else if (s === 'generating') {
+          status.innerHTML = `<span class="spinner"></span>AI 正在生成动画... (${attempts * 3}s)`;
+        }
+      }
+    } catch (e) {
+      // 轮询请求可能偶尔失败，忽略继续
+      status.innerHTML = `<span class="spinner"></span>等待中... (${attempts * 3}s)`;
+    }
+
+    if (attempts >= maxAttempts) {
+      clearInterval(timer);
+      status.innerHTML = '';
+      showAlert('⏰ 等待超时（5分钟），但AI可能仍在后台处理，请稍后在"我的画廊"查看');
+      document.getElementById('btnGenerate').disabled = false;
+      document.getElementById('btnGenerate').textContent = '✨ 生成动画';
+    }
+  }, 3000);
+}
+
+// ==================== Gallery ====================
+function formatTime(isoStr) {
+  if (!isoStr) return '';
+  try {
+    const d = new Date(isoStr);
+    const m = (d.getMonth() + 1).toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
+    const h = d.getHours().toString().padStart(2, '0');
+    const min = d.getMinutes().toString().padStart(2, '0');
+    return `${m}/${day} ${h}:${min}`;
+  } catch { return isoStr.slice(0, 16); }
+}
+
+function getStyleName(code) {
+  const tmpl = styleTemplates.find(s => s.style_code === code);
+  return tmpl?.style_name || code || '未知风格';
+}
+
+let galleryItems = []; // 缓存画廊数据，用于详情弹窗
+
+async function loadGallery() {
+  const grid = document.getElementById('galleryGrid');
+  try {
+    const data = await api('/api/v1/animations?page=1&page_size=20');
+    if (data.code === 0 && data.data) {
+      const rawItems = data.data.items || [];
+      // Only show completed animations with video_url
+      const items = rawItems.filter(a => a.status === 'completed' && a.video_url);
+      galleryItems = items; // 缓存
+      if (items.length === 0) {
+        grid.innerHTML = `<div class="gallery-empty"><div class="empty-icon">🎬</div>还没有成功的动画作品<br>上传画作并生成后在这里查看</div>`;
+        return;
+      }
+      grid.innerHTML = items.map((a, idx) => {
+        const style = getStyleName(a.prompt_style);
+        const artTitle = a.artwork_title || '未命名画作';
+        const time = formatTime(a.created_at);
+        const thumbUrl = a.artwork_thumbnail || a.artwork_original_url || '';
+        return `
+        <div class="gallery-card" onclick="openGalleryDetail(${idx})">
+          <div class="gallery-thumb-wrap">
+            <img class="gallery-thumb" src="${thumbUrl}" alt="缩略图"
+                 onerror="this.style.display='none'">
+            <div class="gallery-thumb-fallback">🎬</div>
+          </div>
+          <div class="gallery-info">
+            <div class="gallery-title">${style} · ${artTitle}</div>
+            <div class="gallery-meta">${time}
+              <span class="gallery-status status-done">已完成</span>
+            </div>
+            ${a.video_url ? `<a class="btn-download" href="${a.video_url}" download target="_blank" onclick="event.stopPropagation()">⬇ 下载</a>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+    }
+  } catch (e) {
+    grid.innerHTML = '<div class="gallery-empty">加载失败</div>';
+  }
+}
+
+function openGalleryDetail(idx) {
+  const item = galleryItems[idx];
+  if (!item) return;
+
+  const modal = document.getElementById('modalOverlay');
+  const content = document.getElementById('modalContent');
+  const style = getStyleName(item.prompt_style);
+  const artTitle = item.artwork_title || '未命名画作';
+  const time = formatTime(item.created_at);
+  const thumbUrl = item.artwork_thumbnail || item.artwork_original_url || '';
+  const videoUrl = item.video_url || '';
+
+  content.innerHTML = `
+    <div class="gallery-detail">
+      <h3>${style} · ${artTitle}</h3>
+      <p class="detail-time">${time} 创建</p>
+      ${thumbUrl ? `<div class="detail-original">
+        <div class="detail-label">📷 原画</div>
+        <img src="${thumbUrl}" alt="原画" style="width:100%;border-radius:12px;max-height:300px;object-fit:contain;background:#f0f0f0;">
+      </div>` : ''}
+      ${videoUrl ? `<div class="detail-video">
+        <div class="detail-label">🎬 动画</div>
+        <video controls src="${videoUrl}" style="width:100%;border-radius:12px;background:#000;" preload="metadata"></video>
+        <a class="btn-detail-download" href="${videoUrl}" download target="_blank">⬇ 下载视频</a>
+      </div>` : ''}
+    </div>
+  `;
+  modal.classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('open');
+}
+
+// ==================== Init ====================
+(function init() {
+  const savedToken = localStorage.getItem(TOKEN_KEY);
+  const savedNick = localStorage.getItem(NICK_KEY);
+  if (savedToken && savedNick) {
+    token = savedToken;
+    nickname = savedNick;
+    // Verify token is still valid
+    api('/api/v1/auth/me').then(data => {
+      if (data.code === 0 && data.data) {
+        currentUser = data.data;
+        showApp();
+      } else {
+        token = '';
+        localStorage.removeItem(TOKEN_KEY);
+      }
+    }).catch(() => {
+      token = '';
+      localStorage.removeItem(TOKEN_KEY);
+    });
+  }
+})();
+</script>
+</body>
+</html>
