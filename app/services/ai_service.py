@@ -151,25 +151,6 @@ class AIService:
     VIDEO_MODEL = "wan2.7-i2v-2026-04-25"
 
     @staticmethod
-    def _get_image_data(image_url: str) -> str:
-        """
-        将图片转为 DashScope 可用的 HTTP URL。
-        DashScope img_url 只接受 HTTP/HTTPS URL，不支持 base64 data URI。
-        """
-        if not image_url:
-            return ""
-
-        # 本地路径 /local/xxx.jpg → http://公网IP:8000/local/xxx.jpg
-        if image_url.startswith("/local/"):
-            return f"http://{settings.SELF_HOST}{image_url}"
-
-        # 已是 http/https URL，直接返回
-        if image_url.startswith("http://") or image_url.startswith("https://"):
-            return image_url
-
-        return image_url
-
-    @staticmethod
     def _get_image_base64(image_url: str) -> str:
         """
         将图片转为 base64 data URI（供多模态对话 API 使用）。
@@ -208,8 +189,8 @@ class AIService:
                 logger.error("DASHSCOPE_API_KEY 未配置")
                 return None
 
-            # 处理图片（本地路径 → base64 或 HTTP URL）
-            img_input = AIService._get_image_data(image_url)
+            # 处理图片：本地路径 → base64 data URI（视频 API 也用 base64，避免公网下载超时）
+            img_input = AIService._get_image_base64(image_url)
             if not img_input:
                 logger.error("图片路径为空")
                 return None
@@ -218,12 +199,17 @@ class AIService:
                 f"提交视频生成任务 | img_len={len(img_input)} | prompt={prompt[:60]}..."
             )
 
-            # 构造请求体
+            # 构造请求体（wan2.7 使用 media 数组格式）
             payload = {
                 "model": AIService.VIDEO_MODEL,
                 "input": {
                     "prompt": prompt,
-                    "img_url": img_input,
+                    "media": [
+                        {
+                            "type": "first_frame",
+                            "url": img_input,
+                        }
+                    ],
                 },
                 "parameters": {
                     "resolution": resolution.upper(),

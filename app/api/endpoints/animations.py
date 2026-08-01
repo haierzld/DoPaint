@@ -88,7 +88,7 @@ async def generate_animation(
 
     # 提交阿里万象任务 + 后台轮询（改为全异步，避免阻塞HTTP请求）
     try:
-        # 图片URL：/_get_image_data会自动将/local/路径转为base64，HTTP URL直传
+        # 图片URL：_get_image_base64 会自动将 /local/ 路径转为 base64 data URI
         raw_url = artwork.processed_url or artwork.original_url
 
         # 先返回，后台线程负责提交 & 轮询
