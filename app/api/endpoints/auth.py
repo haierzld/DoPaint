@@ -73,6 +73,19 @@ async def wechat_login(req: WechatLoginRequest, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/me", summary="验证Token并获取当前用户基本信息")
+async def get_me(current_user: User = Depends(get_current_user)):
+    """轻量接口，用于前端验证 Token 是否有效"""
+    return success(
+        data={
+            "id": current_user.id,
+            "nickname": current_user.nickname or "",
+            "avatar": current_user.avatar or "",
+            "role": current_user.role,
+        }
+    )
+
+
 @router.get("/profile", summary="获取个人信息")
 async def get_profile(
     current_user: User = Depends(get_current_user),
