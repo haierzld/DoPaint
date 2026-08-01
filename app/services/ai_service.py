@@ -5,6 +5,8 @@ AI 服务封装
 - 任务轮询
 """
 from __future__ import annotations
+import os
+import base64
 import re
 import time
 import requests
@@ -168,6 +170,26 @@ class AIService:
         return image_url
 
     @staticmethod
+    def _get_image_base64(image_url: str) -> str:
+        """
+        将图片转为 base64 data URI（供多模态对话 API 使用）。
+        多模态 API 支持 base64，DashScope 服务器无法直接下载我们的 HTTP URL。
+        """
+        if not image_url:
+            return ""
+
+        # 本地路径 → 读取文件 → base64
+        if image_url.startswith("/local/"):
+            local_path = os.path.join("local_storage", image_url.replace("/local/", ""))
+            if os.path.exists(local_path):
+                with open(local_path, "rb") as f:
+                    data = f.read()
+                b64 = base64.b64encode(data).decode("utf-8")
+                return f"data:image/jpeg;base64,{b64}"
+
+        return image_url
+
+    @staticmethod
     def generate_video(
         image_url: str,
         prompt: str,
@@ -323,8 +345,9 @@ class AIService:
         try:
             from dashscope import MultiModalConversation
 
-            img_url = AIService._get_image_data(image_url)
-            if not img_url:
+            # 多模态 API 用 base64（DashScope 无法下载我们的公网 URL）
+            img_b64 = AIService._get_image_base64(image_url)
+            if not img_b64:
                 return None
 
             messages = [
@@ -335,7 +358,7 @@ class AIService:
                 {
                     "role": "user",
                     "content": [
-                        {"image": img_url},
+                        {"image": img_b64},
                         {"text": "请分析这幅幼儿画作的内容，描述它画了什么，采用了什么颜色，表现了什么主题"},
                     ],
                 },
