@@ -47,13 +47,25 @@ async def upload_artwork(
     # 读取文件
     image_data = await file.read()
 
+    # 高清图 VIP 校验：≥MAX_FREE_UPLOAD_MB 仅 VIP 用户可上传
+    free_limit = settings.MAX_FREE_UPLOAD_MB * 1024 * 1024
+
+    is_high_res = len(image_data) >= free_limit
+    if is_high_res and current_user.personal_plan == "free":
+        return error(
+            f"高清图上传需开通 VIP 会员。当前图片 {len(image_data)/1024/1024:.1f}MB，"
+            f"免费用户最大支持 {settings.MAX_FREE_UPLOAD_MB}MB。"
+            f"开通 VIP 即可上传 {settings.MAX_UPLOAD_SIZE_MB}MB 高清画作并获得更高质量动画。",
+            code=402
+        )
+
     # 校验文件大小
     if len(image_data) > settings.max_upload_bytes:
         return error(f"文件过大，最大支持 {settings.MAX_UPLOAD_SIZE_MB}MB")
 
     # 处理
     svc = ArtworkService(db)
-    artwork = svc.upload_and_process(
+    artwork, compress_meta = svc.upload_and_process(
         user_id=current_user.id,
         org_id=current_user.org_id,
         image_data=image_data,
@@ -63,6 +75,14 @@ async def upload_artwork(
     )
 
     is_duplicate = getattr(artwork, "is_duplicate", False)
+
+    # 高清图压缩提示
+    compress_msg = ""
+    if compress_meta.get("was_compressed"):
+        compress_msg = (
+            f"高清图已自动压缩: {compress_meta['original_size']/1024/1024:.1f}MB → "
+            f"{compress_meta['final_size']/1024/1024:.1f}MB (节省 {compress_meta['compression_ratio']}%)"
+        )
 
     return success(
         data={
@@ -76,6 +96,8 @@ async def upload_artwork(
             "status": artwork.status,
             "created_at": artwork.created_at.isoformat() if artwork.created_at else "",
             "is_duplicate": is_duplicate,
+            "is_high_res": is_high_res,
+            "compress_msg": compress_msg,
         }
     )
 

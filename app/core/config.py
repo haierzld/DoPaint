@@ -64,6 +64,9 @@ class Settings(BaseSettings):
 
     # ---- 上传限制 ----
     MAX_UPLOAD_SIZE_MB: int = 20
+    MAX_FREE_UPLOAD_MB: int = 10               # 免费用户最大上传 10MB，超限需 VIP
+    HIGH_RES_COMPRESS_MB: int = 2              # 高清图压缩目标 ≤2MB
+    HIGH_RES_MAX_PIXELS: int = 2048            # 高清图压缩后最大边长
     ALLOWED_IMAGE_TYPES: str = "jpg,jpeg,png,webp,bmp"
 
     @property
