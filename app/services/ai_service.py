@@ -321,16 +321,11 @@ class AIService:
         返回 {"description": "...", "recommended_styles": ["ocean", "forest", ...]}
         """
         try:
-            import dashscope
             from dashscope import MultiModalConversation
 
-            img_b64 = AIService._get_image_data(image_url)
-            if not img_b64:
+            img_url = AIService._get_image_data(image_url)
+            if not img_url:
                 return None
-
-            # 如果已经是 base64 data uri，提取纯 base64
-            if "base64," in img_b64:
-                img_b64 = img_b64.split("base64,", 1)[1]
 
             messages = [
                 {
@@ -340,7 +335,7 @@ class AIService:
                 {
                     "role": "user",
                     "content": [
-                        {"image": f"data:image/jpeg;base64,{img_b64}"},
+                        {"image": img_url},
                         {"text": "请分析这幅幼儿画作的内容，描述它画了什么，采用了什么颜色，表现了什么主题"},
                     ],
                 },
