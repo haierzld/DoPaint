@@ -15,8 +15,8 @@ from loguru import logger
 from app.core.config import settings
 from app.models.artwork import Artwork
 
-# 高清图阈值（10MB）
-HIGH_RES_THRESHOLD = 10 * 1024 * 1024
+# 压缩阈值（2MB），超过即启动压缩
+HIGH_RES_THRESHOLD = 2 * 1024 * 1024
 # 压缩目标（2MB）
 COMPRESS_TARGET = 2 * 1024 * 1024
 
@@ -37,7 +37,7 @@ class ArtworkService:
     @staticmethod
     def compress_high_res(image_data: bytes) -> tuple[bytes, dict]:
         """
-        将 ≥10MB 的高清图压缩到 <2MB。
+        将 >2MB 的图片压缩到 <2MB。
         返回 (compressed_bytes, meta_info)
         采用渐进降质策略：先缩尺寸 → 再降 JPEG quality
         """
@@ -55,7 +55,7 @@ class ArtworkService:
             return image_data, meta
 
         logger.info(
-            f"检测到高清图 ({original_size / 1024 / 1024:.1f}MB)，开始压缩..."
+            f"检测到图片超过2MB ({original_size / 1024 / 1024:.1f}MB)，开始压缩..."
         )
 
         try:
@@ -105,7 +105,7 @@ class ArtworkService:
             return best_data, meta
 
         except Exception as e:
-            logger.warning(f"高清图压缩失败，使用原图: {e}")
+            logger.warning(f"图片压缩失败，使用原图: {e}")
             meta["strategy"] = "fallback_original"
             return image_data, meta
 
@@ -151,7 +151,7 @@ class ArtworkService:
             existing.is_duplicate = True
             return existing, {}
 
-        # 高清图压缩（≥10MB → <2MB）
+        # 图片压缩（>2MB → <2MB）
         compress_meta = {}
         if len(image_data) >= HIGH_RES_THRESHOLD:
             image_data, compress_meta = ArtworkService.compress_high_res(image_data)

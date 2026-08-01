@@ -76,11 +76,11 @@ async def upload_artwork(
 
     is_duplicate = getattr(artwork, "is_duplicate", False)
 
-    # 高清图压缩提示
+    # 图片压缩提示
     compress_msg = ""
     if compress_meta.get("was_compressed"):
         compress_msg = (
-            f"高清图已自动压缩: {compress_meta['original_size']/1024/1024:.1f}MB → "
+            f"图片已自动压缩: {compress_meta['original_size']/1024/1024:.1f}MB → "
             f"{compress_meta['final_size']/1024/1024:.1f}MB (节省 {compress_meta['compression_ratio']}%)"
         )
 
